@@ -1,0 +1,154 @@
+# AUTHOR: IAN ALEXANDER
+# COMPANY: REPAIRTECH, INC.
+# DATE: 1/26/2017
+# COPYRIGHT 2017 ALL RIGHTS RESERVED
+# TECHSUITE-RMM POWERSHELL INTEGRATION SCRIPT
+
+function main {
+    
+	# ---------YOU  MODIFY THESE TWO VARIABLES---------------------------------------------------------------------------------------------
+	#
+	# YOU CAN GET YOUR TECH ID BY RIGHT CLICKING THE "CONSOLE VERSION" BUTTON AND 
+	# ON YOUR DOWNLOADS PAGE, AND CLICKING "COPY LINK". THE NUMBER IN THE URL IS YOUR TECH ID.
+	# EXAMPLE: IF https://repairtechsolutions.com/teches/9999/download_techsuite_windows_console IS THE DOWNLOAD URL, "9999" IS YOUR TECH ID
+	$tech_id = "7632"
+	
+	#this is your shop api key, found on the TechSuite Online Dashboard, Settings Page > App Settings tab
+	$api_key = "pdxi8vbv2h7eevt5x1x8"
+	
+	# THE NAME OF THE PROCEDURE YOU WANT TO RUN:
+	$procedure_name = "Cleanup"
+	
+	# ENTER YOUR TECHSUITE WINDOWS APP STARTUP PASSWORD, IF YOU HAVE ONE (LEAVE BLANK IF YOU DON'T HAVE ONE):
+	$startup_password = ""
+	
+	# ENTER THE CUSTOMER NAME HERE, IF APPLICABLE. IT WILL AUTOMATICALLY APPEND COMPUTER NAME TO THE END
+	$customer_name = "CMPTRX, Inc dba ComputeRx - Roger McClelland"
+	
+	
+	
+#-- YOU DON"T HAVE TO MODIFY ANYTHING BELOW THIS LINE -------------------------------------------------------------------------------------
+	
+    runApp $tech_id $procedure_name $startup_password $customer_name
+}
+
+function createDirectories($downloadPath) {
+	"Creating Necessary Directory..."
+	
+    If (!(test-path $downloadPath)) {
+        New-Item -ItemType Directory -Force -Path $downloadPath
+    }
+	"Done."
+}
+
+function downloadTechSuite ($appPath, $downloadurl) {
+	"Downloading TechSuite..."
+    $wc = New-Object System.Net.WebClient
+    if (test-path $appPath) {
+        remove-item $appPath
+    }
+    $wc.downloadFile($downloadUrl, $appPath)
+	
+	if (test-path $appPath) {
+		"Download Successful."
+	}
+	else {
+		"Download failed. Please ensure you have the proper tech id entered."
+	}
+}
+
+function runTechSuite ($appPath, $procedure_name, $password, $customer_name) {
+	"Running TechSuite..."
+	$params = "--run --procedure ""${procedure_name}"""
+	
+	$customer = " --customer "
+	$computer_name = getComputerName
+	
+	if ($customer_name.length -gt 0) {
+		$customer = $customer + """${customer_name} (${computer_name})"""
+	}
+	else {
+		$customer = $customer + """${computer_name}"""
+	}
+	
+	$params = $params + $customer
+	
+	if ($password.length -gt 0) {
+		$params = $params + " --password ""${password}"""
+	}
+	
+	Start-Process -FilePath $appPath -ArgumentList $params
+	"Done."
+}
+
+#function to wait for the process to exit
+function waitProcess ($processName) {
+    do {
+        Start-Sleep -s 10
+        #if p is not null, process exists and we repeat
+        $p = get-process $processName -erroraction SilentlyContinue 
+    } while($p)
+}
+
+function cleanupTechSuite($appPath, $downloadPath) {
+    "Cleaning up TechSuite..."
+	
+    do {
+        Start-Sleep -Seconds 5
+    } until ((Get-WMIobject -Class Win32_process -Filter "Name='TechSuite.exe'" | where {$_.Name -eq "TechSuite.exe"}).ProcessID -eq $null)
+
+	if (test-path $appPath) {
+		remove-item -Force -Recurse $appPath -Confirm:$false
+	}
+	if (test-path "${downloadPath}\TechSuite") {
+		remove-item -Force -Recurse "${downloadPath}\TechSuite" -Confirm:$false
+	}
+	
+	"Done."
+}
+
+function runApp($tech_id, $procedure_name, $password, $customer_name) {
+	"Starting..."
+	$paramsCheck = checkParams $tech_id $procedure_name
+	if($paramsCheck -eq 1) {
+		"You did not modify the PowerShell script correctly. Please enter your tech ID and a Procedure Name. Documentation here: https://www.repairtechsolutions.com/documentation/integrations/"
+	}
+	else {
+		$downloadurl = "https://repairtechsolutions.com/teches/${tech_id}/download_techsuite_windows_console/?api_key=${api_key}"
+		
+		# CREATE NECESSARY DIRECTORIES
+		$downloadPath = join-path $env:SystemDrive "\TechSuite"
+		createDirectories $downloadPath
+		
+		# DOWNLOAD TechSuite
+		$appPath = join-path $downloadPath "\TechSuite.exe"
+		downloadTechSuite $appPath $downloadurl
+		
+		# RUN TechSuite AND WAIT FOR IT TO EXIT
+		runTechSuite $appPath $procedure_name $password $customer_name
+		waitProcess('TechSuite.exe')
+		
+		cleanupTechSuite $appPath, $downloadPath
+		"Finished."
+	}	
+}
+
+function getComputerName() {
+	return $env:computername;
+}
+
+function checkParams($tech_id, $procedure_name) {
+	$returnVal = 0
+	
+	if($tech_id.length -eq 0) {
+		"No Tech ID present."
+		$returnVal = 1
+	}
+	if($procedure_name.length -eq 0) {
+		"No Procedure Name present."
+		$returnVal = 1
+	}
+	return $returnVal
+}
+
+main
